@@ -8,6 +8,7 @@ import torch
 from utils.vocabulary import Vocab
 
 class LMOrderedIterator(object):
+    #I think bptt is target len
     def __init__(self, data, bsz, bptt, device='cpu', ext_len=None):
         """
             data -- LongTensor -- the LongTensor is strictly ordered

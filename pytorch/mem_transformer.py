@@ -39,6 +39,8 @@ class PositionwiseFF(nn.Module):
         self.d_inner = d_inner
         self.dropout = dropout
 
+        #NOTE: This is identical to original
+
         self.CoreNet = nn.Sequential(
             nn.Linear(d_model, d_inner), nn.ReLU(inplace=True),
             nn.Dropout(dropout),
@@ -50,21 +52,26 @@ class PositionwiseFF(nn.Module):
 
         self.pre_lnorm = pre_lnorm
 
+
+    #QUESTION: WHAT IS shape of inp to make this work (elementwise fnn and have batch dim)
     def forward(self, inp):
-        if self.pre_lnorm:
+        if self.pre_lnorm: #It seems like they might use prelayer norm in this paper
             ##### layer normalization + positionwise feed-forward
             core_out = self.CoreNet(self.layer_norm(inp))
 
             ##### residual connection
             output = core_out + inp
         else:
-            ##### positionwise feed-forward
+            ##### positionwise feed-forward (this is what's used in original transformer)
             core_out = self.CoreNet(inp)
 
             ##### residual connection + layer normalization
             output = self.layer_norm(inp + core_out)
 
         return output
+
+
+
 
 class MultiHeadAttn(nn.Module):
     def __init__(self, n_head, d_model, d_head, dropout, dropatt=0, 
@@ -150,6 +157,8 @@ class RelMultiHeadAttn(nn.Module):
         self.d_head = d_head
         self.dropout = dropout
 
+        #Get query, key and value for each token (NOTE SOME Inefficiency since
+        #don't need query for any of the memory. Parallelization must make up for it
         self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head, bias=False)
 
         self.drop = nn.Dropout(dropout)
@@ -430,10 +439,13 @@ class RelPartialLearnableDecoderLayer(nn.Module):
         return output
 
 
+
 class AdaptiveEmbedding(nn.Module):
     def __init__(self, n_token, d_embed, d_proj, cutoffs, div_val=1, 
                  sample_softmax=False):
         super(AdaptiveEmbedding, self).__init__()
+
+        #NOTE d_proj is just d_model and so is d_embed
 
         self.n_token = n_token
         self.d_embed = d_embed
@@ -442,12 +454,14 @@ class AdaptiveEmbedding(nn.Module):
         self.div_val = div_val
         self.d_proj = d_proj
 
-        self.emb_scale = d_proj ** 0.5
+        self.emb_scale = d_proj ** 0.5 #QUESTION: Is this the scaling for key size?
 
         self.cutoff_ends = [0] + self.cutoffs
 
         self.emb_layers = nn.ModuleList()
         self.emb_projs = nn.ParameterList()
+
+        #In actual experiments div_val looks to be 1
         if div_val == 1:
             self.emb_layers.append(
                 nn.Embedding(n_token, d_embed, sparse=sample_softmax>0)
@@ -534,6 +548,7 @@ class MemTransformerLM(nn.Module):
                 )
         elif attn_type == 1: # learnable embeddings
             for i in range(n_layer):
+                #NOTE: each decoder layer just has RelPartialLearnableMultiHeadAttn followed by basic PositionWiseFF
                 self.layers.append(
                     RelLearnableDecoderLayer(
                         n_head, d_model, d_head, d_inner, dropout,
@@ -604,6 +619,7 @@ class MemTransformerLM(nn.Module):
         self.mem_len = mem_len
         self.ext_len = ext_len
 
+    #QUESTION: What is happening here?
     def init_mems(self):
         if self.mem_len > 0:
             mems = []
@@ -616,6 +632,7 @@ class MemTransformerLM(nn.Module):
         else:
             return None
 
+    #NOTE: qlen looks to be number of characters in one example
     def _update_mems(self, hids, mems, qlen, mlen):
         # does not deal with None
         if mems is None: return None
@@ -640,7 +657,7 @@ class MemTransformerLM(nn.Module):
         return new_mems
 
     def _forward(self, dec_inp, mems=None):
-        qlen, bsz = dec_inp.size()
+        qlen, bsz = dec_inp.size() #NOTE: qlen seems to be number of characters in input ex
 
         word_emb = self.word_emb(dec_inp)
 
@@ -661,7 +678,7 @@ class MemTransformerLM(nn.Module):
 
         hids = []
         if self.attn_type == 0: # default
-            pos_seq = torch.arange(klen-1, -1, -1.0, device=word_emb.device, 
+            pos_seq = torch.arange(klen-1, -1, -1.0, device=word_emb.device,
                                    dtype=word_emb.dtype)
             if self.clamp_len > 0:
                 pos_seq.clamp_(max=self.clamp_len)
@@ -676,6 +693,7 @@ class MemTransformerLM(nn.Module):
                 core_out = layer(core_out, pos_emb, self.r_w_bias,
                         self.r_r_bias, dec_attn_mask=dec_attn_mask, mems=mems_i)
                 hids.append(core_out)
+
         elif self.attn_type == 1: # learnable
             core_out = self.drop(word_emb)
             hids.append(core_out)

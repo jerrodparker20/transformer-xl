@@ -441,7 +441,7 @@ def train():
                 else:
                     loss.backward()
                 train_loss += loss.float().item()
-        else:
+        else: #NOTE BATCH CHUNK USUALLY 1
             ret = para_model(data, target, *mems)
             loss, mems = ret[0], ret[1:]
             loss = loss.float().mean().type_as(loss)
